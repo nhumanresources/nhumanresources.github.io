@@ -853,6 +853,10 @@
     <div class="nav-item" data-view="analytics">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span> Analytics
     </div>
+    <div class="nav-item" data-view="recruit">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg></span> Zoho Recruit
+      <span class="nav-badge" id="badge-recruit">0</span>
+    </div>
     <div class="nav-item" data-view="crm">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></span> CRM
     </div>
@@ -1448,8 +1452,8 @@ function createNewJob() {
 // ─────────────────────────────────────────────
 //  NAVIGATION
 // ─────────────────────────────────────────────
-const views = { setup: renderSetup, candidates: renderCandidates, chat: renderChat, whatsapp: renderWhatsApp, calendar: renderCalendar, campaigns: renderCampaigns, crm: renderCRM, analytics: renderAnalytics, admin: renderAdmin };
-const pageTitles = { setup: 'Setup', candidates: 'Candidates', chat: 'Resume Stack Ranker', whatsapp: 'WhatsApp Outreach', calendar: 'Schedule Interviews', campaigns: 'Campaigns', crm: 'CRM Repository', analytics: 'Analytics', admin: 'Admin · User Management' };
+const views = { setup: renderSetup, candidates: renderCandidates, chat: renderChat, whatsapp: renderWhatsApp, calendar: renderCalendar, campaigns: renderCampaigns, recruit: renderRecruit, crm: renderCRM, analytics: renderAnalytics, admin: renderAdmin };
+const pageTitles = { setup: 'Setup', candidates: 'Candidates', chat: 'Resume Stack Ranker', whatsapp: 'WhatsApp Outreach', calendar: 'Schedule Interviews', campaigns: 'Campaigns', recruit: 'Zoho Recruit Repository', crm: 'CRM Repository', analytics: 'Analytics', admin: 'Admin · User Management' };
 
 function navigate(view) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === view));
@@ -4332,6 +4336,287 @@ function copyEmailToClipboard() {
   const body = document.getElementById('email-body')?.value;
   navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`);
   toast('Email copied to clipboard', 'success');
+}
+
+// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+//  ZOHO RECRUIT REPOSITORY
+// ─────────────────────────────────────────────
+let _recruitData = { jobs: [], byJob: {}, lastSync: null, activeJobId: null };
+
+function renderRecruit() {
+  const content = document.getElementById('content');
+  const { jobs, lastSync, activeJobId } = _recruitData;
+  const activeJob = jobs.find(j => j.id === activeJobId);
+  const candidates = activeJobId ? (_recruitData.byJob[activeJobId] || []) : [];
+  const totalCandidates = Object.values(_recruitData.byJob).reduce((s, a) => s + a.length, 0);
+
+  content.innerHTML = `
+  <!-- Header bar -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+    <div style="flex:1;min-width:200px">
+      <div style="font-size:13px;color:var(--text-muted);margin-top:2px">
+        ${lastSync ? '🔄 Last synced: ' + new Date(lastSync).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : 'Not synced yet — click Sync to pull all jobs and candidates from Zoho Recruit'}
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="syncRecruitData()" id="recruit-sync-btn" style="display:flex;align-items:center;gap:7px;font-size:13px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+      Sync from Zoho Recruit
+    </button>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row" style="margin-bottom:20px" id="recruit-stats">
+    <div class="stat-card"><div class="stat-label">Total Jobs</div><div class="stat-value" style="color:var(--primary)">${jobs.length}</div><div class="stat-sub">in Zoho Recruit</div></div>
+    <div class="stat-card"><div class="stat-label">Active Jobs</div><div class="stat-value" style="color:var(--success)">${jobs.filter(j=>j.status==='Open'||j.status==='Active'||(j.status||'').toLowerCase().includes('open')).length}</div><div class="stat-sub">currently open</div></div>
+    <div class="stat-card"><div class="stat-label">Total Candidates</div><div class="stat-value" style="color:#7c3aed">${totalCandidates}</div><div class="stat-sub">across all jobs</div></div>
+    <div class="stat-card"><div class="stat-label">Selected Job</div><div class="stat-value" style="color:var(--warning);font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${activeJob ? activeJob.title : '—'}</div><div class="stat-sub">${activeJob ? (candidates.length + ' candidates') : 'click a job below'}</div></div>
+  </div>
+
+  ${jobs.length === 0 ? `
+  <!-- Empty state -->
+  <div style="text-align:center;padding:60px 24px;background:#fff;border-radius:14px;border:1.5px dashed var(--border)">
+    <div style="font-size:48px;margin-bottom:16px">📋</div>
+    <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:8px">No jobs loaded yet</div>
+    <div style="font-size:14px;color:var(--text-muted);margin-bottom:20px;max-width:360px;margin-left:auto;margin-right:auto">
+      Click <b>Sync from Zoho Recruit</b> above to pull all your job openings and their candidates.<br><br>
+      Make sure your Zoho token (in API Settings) has the <code style="background:#f5f5f7;padding:2px 6px;border-radius:4px">ZohoRecruit.modules.ALL</code> scope.
+    </div>
+    <button class="btn btn-primary" onclick="syncRecruitData()">↻ Sync Now</button>
+  </div>` : `
+
+  <!-- Job cards -->
+  <div style="margin-bottom:6px;font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Job Openings (${jobs.length})</div>
+  <div id="recruit-jobs-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-bottom:24px">
+    ${jobs.map(j => {
+      const count = (_recruitData.byJob[j.id] || []).length;
+      const isActive = j.id === activeJobId;
+      const isOpen = j.status === 'Open' || j.status === 'Active' || (j.status||'').toLowerCase().includes('open');
+      return `<div onclick="selectRecruitJob('${j.id}')" style="background:#fff;border:2px solid ${isActive ? 'var(--primary)' : 'var(--border)'};border-radius:12px;padding:16px;cursor:pointer;transition:all .15s;box-shadow:${isActive ? '0 0 0 3px rgba(79,110,247,.12)' : '0 1px 4px rgba(0,0,0,.04)'}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:700;color:var(--text);line-height:1.35;flex:1;padding-right:8px">${escHtml(j.title)}</div>
+          <span style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:20px;white-space:nowrap;background:${isOpen ? '#f0fdf4' : '#f5f5f7'};color:${isOpen ? '#16a34a' : '#6b7280'};border:1px solid ${isOpen ? '#86efac' : '#e5e7eb'}">${escHtml(j.status||'Active')}</span>
+        </div>
+        ${j.client ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">🏢 ${escHtml(j.client)}</div>` : ''}
+        ${j.city ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">📍 ${escHtml(j.city)}</div>` : ''}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid #f1f5f9">
+          <span style="font-size:12px;font-weight:700;color:${count > 0 ? 'var(--primary)' : 'var(--text-muted)'}">
+            ${count > 0 ? count + ' candidate' + (count !== 1 ? 's' : '') : count === 0 && _recruitData.byJob[j.id] !== undefined ? 'No candidates' : '— click to load'}
+          </span>
+          ${count > 0 ? `<button onclick="event.stopPropagation();importAllRecruitCandidates('${j.id}')" style="font-size:10px;padding:3px 8px;background:var(--primary);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600">Import All</button>` : ''}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>
+
+  <!-- Candidate table (shown when a job is selected) -->
+  <div id="recruit-candidates-section" style="${activeJob ? '' : 'display:none'}">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <div style="font-size:14px;font-weight:700;color:var(--text)">
+        Candidates for: <span style="color:var(--primary)">${escHtml(activeJob?.title || '')}</span>
+        <span style="font-size:12px;font-weight:400;color:var(--text-muted);margin-left:6px">${candidates.length} total</span>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="recruit-search" placeholder="Search name, phone, email…" oninput="filterRecruitTable()" style="padding:7px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;outline:none;width:220px">
+        ${candidates.length > 0 ? `<button onclick="importAllRecruitCandidates('${activeJobId}')" class="btn btn-primary btn-sm" style="font-size:12px">⬇ Import All (${candidates.length}) to ScoutX</button>` : ''}
+      </div>
+    </div>
+    <div class="card" style="overflow:hidden">
+      <div id="recruit-candidate-table" style="overflow-x:auto"></div>
+    </div>
+  </div>
+  `}
+  `;
+
+  if (activeJob && candidates.length > 0) renderRecruitCandidateTable(candidates);
+}
+
+function selectRecruitJob(jobId) {
+  _recruitData.activeJobId = jobId;
+  const alreadyLoaded = _recruitData.byJob[jobId] !== undefined;
+  if (!alreadyLoaded) {
+    loadRecruitCandidates(jobId);
+  } else {
+    renderRecruit();
+  }
+}
+
+async function syncRecruitData() {
+  const token = state.cfg.zohoToken;
+  const domain = state.cfg.zohoDomain || 'https://www.zohoapis.in';
+  if (!token) { toast('⚠️ Add your Zoho token in API Settings first', 'warning'); document.getElementById('config-modal').classList.add('show'); return; }
+
+  const btn = document.getElementById('recruit-sync-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin .8s linear infinite"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg> Syncing jobs…'; }
+
+  try {
+    const r = await fetch(APPROVAL_URL, { method: 'POST', body: JSON.stringify({ action: 'zoho_recruit_jobs', zohoToken: token, zohoDomain: domain }) });
+    const d = await r.json();
+    if (!d.ok) { toast('✗ ' + (d.error || 'Failed to load jobs'), 'error'); if (btn) { btn.disabled = false; btn.innerHTML = '↻ Sync from Zoho Recruit'; } return; }
+
+    _recruitData.jobs = d.jobs || [];
+    _recruitData.byJob = {};
+    _recruitData.lastSync = Date.now();
+    _recruitData.activeJobId = _recruitData.jobs[0]?.id || null;
+
+    // Update badge
+    document.getElementById('badge-recruit').textContent = _recruitData.jobs.length || '';
+
+    toast('✅ Loaded ' + _recruitData.jobs.length + ' jobs — now loading candidates…');
+    renderRecruit();
+
+    // Load candidates for all jobs sequentially
+    for (const job of _recruitData.jobs) {
+      if (btn) btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin .8s linear infinite"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg> Loading: ${escHtml(job.title.substring(0,25))}…`;
+      await loadRecruitCandidatesForJob(job.id, job.title, token, domain);
+      if (document.querySelector('.nav-item.active')?.dataset.view === 'recruit') renderRecruit();
+    }
+
+    _recruitData.lastSync = Date.now();
+    if (btn) { btn.disabled = false; btn.innerHTML = '↻ Sync from Zoho Recruit'; }
+    const total = Object.values(_recruitData.byJob).reduce((s, a) => s + a.length, 0);
+    toast(`✅ Sync complete — ${_recruitData.jobs.length} jobs, ${total} candidates`, 'success');
+    renderRecruit();
+  } catch(e) {
+    toast('✗ Sync error: ' + e.message, 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '↻ Sync from Zoho Recruit'; }
+  }
+}
+
+async function loadRecruitCandidatesForJob(jobId, jobTitle, token, domain) {
+  try {
+    const r = await fetch(APPROVAL_URL, { method: 'POST', body: JSON.stringify({ action: 'zoho_recruit_candidates', zohoToken: token, zohoDomain: domain, jobId, jobTitle }) });
+    const d = await r.json();
+    _recruitData.byJob[jobId] = d.ok ? (d.candidates || []) : [];
+  } catch(e) { _recruitData.byJob[jobId] = []; }
+}
+
+async function loadRecruitCandidates(jobId) {
+  const job = _recruitData.jobs.find(j => j.id === jobId);
+  const token = state.cfg.zohoToken;
+  const domain = state.cfg.zohoDomain || 'https://www.zohoapis.in';
+  if (!token) { toast('Add Zoho token in API Settings', 'warning'); return; }
+  toast('Loading candidates for ' + (job?.title || jobId) + '…');
+  await loadRecruitCandidatesForJob(jobId, job?.title || '', token, domain);
+  renderRecruit();
+}
+
+function renderRecruitCandidateTable(candidates) {
+  const wrap = document.getElementById('recruit-candidate-table');
+  if (!wrap) return;
+  const q = (document.getElementById('recruit-search')?.value || '').toLowerCase();
+  const filtered = q ? candidates.filter(c =>
+    (c.name||'').toLowerCase().includes(q) ||
+    (c.email||'').toLowerCase().includes(q) ||
+    (c.phone||'').toLowerCase().includes(q) ||
+    (c.whatsapp||'').toLowerCase().includes(q)
+  ) : candidates;
+
+  if (filtered.length === 0) {
+    wrap.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:14px">No candidates match your search.</div>';
+    return;
+  }
+
+  wrap.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="background:#f8faff;border-bottom:2px solid var(--border)">
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Name</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Phone</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em">WhatsApp</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Email</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Status</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Experience</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Source</th>
+      <th style="padding:10px 14px;text-align:left;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Action</th>
+    </tr></thead>
+    <tbody>
+    ${filtered.map((c, i) => {
+      const initials = (c.name || '?').split(' ').map(w => w[0]||'').slice(0,2).join('').toUpperCase();
+      const colors = ['#4f6ef7','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
+      const bg = colors[(c.name||'').charCodeAt(0) % colors.length];
+      const alreadyAdded = (job()?.candidates || []).some(x => x.email === c.email || (c.phone && x.phone === c.phone));
+      return `<tr style="border-bottom:1px solid #f1f5f9;transition:background .1s" onmouseenter="this.style.background='#f8faff'" onmouseleave="this.style.background=''">
+        <td style="padding:10px 14px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:32px;height:32px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;flex-shrink:0">${escHtml(initials)}</div>
+            <div>
+              <div style="font-weight:600;color:var(--text)">${escHtml(c.name||'Unknown')}</div>
+              ${c.currentEmployer ? `<div style="font-size:11px;color:var(--text-muted)">${escHtml(c.currentEmployer)}</div>` : ''}
+            </div>
+          </div>
+        </td>
+        <td style="padding:10px 14px;color:var(--text-muted)">${escHtml(c.phone||'—')}</td>
+        <td style="padding:10px 14px">
+          ${c.whatsapp ? `<a href="https://wa.me/${(c.whatsapp||'').replace(/\D/g,'')}" target="_blank" rel="noopener" style="color:#25D366;text-decoration:none;font-weight:500;display:flex;align-items:center;gap:4px">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+            ${escHtml(c.whatsapp)}
+          </a>` : '<span style="color:var(--text-muted)">—</span>'}
+        </td>
+        <td style="padding:10px 14px;color:var(--text-muted)">${escHtml(c.email||'—')}</td>
+        <td style="padding:10px 14px">
+          <span style="font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600;background:${c.status==='Active'||c.status==='New'?'#eff6ff':'#f5f5f7'};color:${c.status==='Active'||c.status==='New'?'#1d4ed8':'#6b7280'}">${escHtml(c.status||'New')}</span>
+        </td>
+        <td style="padding:10px 14px;color:var(--text-muted)">${c.experience ? escHtml(c.experience) + ' yrs' : '—'}</td>
+        <td style="padding:10px 14px;color:var(--text-muted);font-size:12px">${escHtml(c.source||'—')}</td>
+        <td style="padding:10px 14px">
+          ${alreadyAdded
+            ? '<span style="font-size:11px;color:var(--success);font-weight:600">✓ Added</span>'
+            : `<button onclick="importSingleRecruitCandidate(${i})" style="font-size:11px;padding:5px 12px;background:#f0f4ff;color:var(--primary);border:1.5px solid #c7d7ff;border-radius:7px;cursor:pointer;font-weight:600;transition:all .15s" onmouseenter="this.style.background='var(--primary)';this.style.color='#fff'" onmouseleave="this.style.background='#f0f4ff';this.style.color='var(--primary)'">+ Add to ScoutX</button>`
+          }
+        </td>
+      </tr>`;
+    }).join('')}
+    </tbody>
+  </table>`;
+
+  // Store filtered candidates reference for single-import by index
+  window._recruitTableCandidates = filtered;
+}
+
+function filterRecruitTable() {
+  const candidates = _recruitData.activeJobId ? (_recruitData.byJob[_recruitData.activeJobId] || []) : [];
+  renderRecruitCandidateTable(candidates);
+}
+
+function importSingleRecruitCandidate(idx) {
+  const c = window._recruitTableCandidates?.[idx];
+  if (!c) return;
+  const activeJob = _recruitData.jobs.find(j => j.id === _recruitData.activeJobId);
+  _importRecruitCandidate(c, activeJob);
+  renderRecruitCandidateTable(_recruitData.byJob[_recruitData.activeJobId] || []);
+}
+
+function importAllRecruitCandidates(jobId) {
+  const candidates = _recruitData.byJob[jobId] || [];
+  const activeJob = _recruitData.jobs.find(j => j.id === jobId);
+  if (candidates.length === 0) { toast('No candidates to import', 'warning'); return; }
+  let added = 0;
+  for (const c of candidates) { if (_importRecruitCandidate(c, activeJob)) added++; }
+  if (added > 0) { saveJobs(); updateBadges(); }
+  toast(`✅ Imported ${added} candidate${added !== 1 ? 's' : ''} to ScoutX${added < candidates.length ? ' (' + (candidates.length - added) + ' already existed)' : ''}`, 'success');
+  renderRecruit();
+}
+
+function _importRecruitCandidate(c, activeJob) {
+  const targetJob = job();
+  if (!targetJob) { toast('Select an active position first', 'warning'); return false; }
+  const exists = (targetJob.candidates || []).some(x => x.email === c.email || (c.phone && x.phone === c.phone));
+  if (exists) return false;
+  const newCand = {
+    id: Date.now() + Math.random(),
+    name: c.name || (c.firstName + ' ' + c.lastName).trim() || 'Unknown',
+    phone: c.whatsapp || c.mobile || c.phone || '',
+    email: c.email || '',
+    role: activeJob?.title || c.jobTitle || targetJob.title || '',
+    experience: c.experience ? c.experience + ' years' : '',
+    skills: c.skills || '',
+    status: 'new',
+    source: 'Zoho Recruit' + (c.source ? ' / ' + c.source : ''),
+    zohoId: c.id || '',
+    addedAt: new Date().toISOString()
+  };
+  if (!targetJob.candidates) targetJob.candidates = [];
+  targetJob.candidates.push(newCand);
+  return true;
 }
 
 // ─────────────────────────────────────────────
