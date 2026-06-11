@@ -820,9 +820,9 @@
 
   <!-- JOB SWITCHER -->
   <div id="job-switcher" style="padding:10px 12px; border-bottom:1px solid #f1f5f9; margin-bottom:4px">
-    <div style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px">Active Position</div>
+    <div id="position-label" style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px">Active Position</div>
     <div style="display:flex; gap:6px; align-items:center">
-      <select id="job-select" onchange="switchJob(+this.value)" style="flex:1; background:#f8faff; border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:12px; padding:5px 8px; cursor:pointer; appearance:none; -webkit-appearance:none; outline:none; overflow:hidden; white-space:nowrap; text-overflow:ellipsis"></select>
+      <select id="job-select" onchange="switchJob(this.value)" style="flex:1; background:#f8faff; border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:12px; padding:5px 8px; cursor:pointer; appearance:none; -webkit-appearance:none; outline:none; overflow:hidden; white-space:nowrap; text-overflow:ellipsis"></select>
       <button onclick="createNewJob()" title="New Position" style="background:#4f6ef7; border:none; border-radius:6px; color:#fff; font-size:16px; width:28px; height:28px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0">+</button>
     </div>
   </div>
@@ -1369,11 +1369,13 @@ function job() {
 
 // Persist jobs to localStorage (waSelected is a Set — convert to array)
 function saveJobs() {
-  const serialized = state.jobs.map(j => ({
-    ...j,
-    waSelected: [...j.waSelected],
-    inbox: j.inbox || []
-  }));
+  const serialized = state.jobs
+    .filter(j => j.source !== 'zoho_recruit')   // don't persist synced-from-Zoho jobs
+    .map(j => ({
+      ...j,
+      waSelected: [...j.waSelected],
+      inbox: j.inbox || []
+    }));
   localStorage.setItem('nhrms_jobs', JSON.stringify(serialized));
   autoSaveCloud();
 }
@@ -1422,13 +1424,37 @@ function saveCampaigns() {
 function renderJobSelect() {
   const sel = document.getElementById('job-select');
   if (!sel) return;
-  sel.innerHTML = state.jobs.map(j =>
-    `<option value="${j.id}" ${j.id === state.activeJobId ? 'selected' : ''}>${j.title}</option>`
-  ).join('');
+  const manual  = state.jobs.filter(j => j.source !== 'zoho_recruit');
+  const recruit = state.jobs.filter(j => j.source === 'zoho_recruit');
+  let html = '';
+  if (recruit.length > 0 && manual.length > 0) {
+    html += '<optgroup label="── Manual Positions">';
+    html += manual.map(j => `<option value="${j.id}" ${String(j.id) === String(state.activeJobId) ? 'selected' : ''}>${j.title}</option>`).join('');
+    html += '</optgroup>';
+    html += `<optgroup label="── Zoho Recruit (${recruit.length})">`;
+    html += recruit.map(j => `<option value="${j.id}" ${String(j.id) === String(state.activeJobId) ? 'selected' : ''}>${j.title} · ${j.candidates.length} applicants</option>`).join('');
+    html += '</optgroup>';
+  } else if (recruit.length > 0) {
+    html += `<optgroup label="── Zoho Recruit (${recruit.length})">`;
+    html += recruit.map(j => `<option value="${j.id}" ${String(j.id) === String(state.activeJobId) ? 'selected' : ''}>${j.title} · ${j.candidates.length} applicants</option>`).join('');
+    html += '</optgroup>';
+  } else {
+    html = manual.map(j => `<option value="${j.id}" ${String(j.id) === String(state.activeJobId) ? 'selected' : ''}>${j.title}</option>`).join('');
+  }
+  sel.innerHTML = html;
+  // update sidebar label
+  const lbl = document.getElementById('position-label');
+  if (lbl) {
+    const cur = state.jobs.find(j => String(j.id) === String(state.activeJobId));
+    lbl.textContent = cur?.source === 'zoho_recruit' ? 'Zoho Recruit Position' : 'Active Position';
+    lbl.style.color = cur?.source === 'zoho_recruit' ? 'var(--primary)' : 'var(--text-muted)';
+  }
 }
 
 function switchJob(id) {
-  state.activeJobId = id;
+  // id may be a numeric string or a "recruit_XXXX" string — coerce to match stored type
+  const match = state.jobs.find(j => String(j.id) === String(id));
+  state.activeJobId = match ? match.id : id;
   renderJobSelect();
   updateBadges();
   // re-render the current view with new job data
@@ -4236,7 +4262,7 @@ function autoSaveCloud() {
 
 async function doCloudSync() {
   try {
-    const payload = { action: 'save_data', email: AUTH.user?.email || '', data: JSON.stringify({ jobs: state.jobs.map(j => ({...j, waSelected: [...j.waSelected], inbox: j.inbox||[]})), campaigns: state.campaigns }) };
+    const payload = { action: 'save_data', email: AUTH.user?.email || '', data: JSON.stringify({ jobs: state.jobs.filter(j => j.source !== 'zoho_recruit').map(j => ({...j, waSelected: [...j.waSelected], inbox: j.inbox||[]})), campaigns: state.campaigns }) };
     await fetch(APPROVAL_URL, { method: 'POST', body: JSON.stringify(payload) });
     _lastCloudSync = new Date();
     const dot = document.getElementById('cloud-dot');
@@ -4343,6 +4369,57 @@ function copyEmailToClipboard() {
 //  ZOHO RECRUIT REPOSITORY
 // ─────────────────────────────────────────────
 let _recruitData = { jobs: [], byJob: {}, lastSync: null, activeJobId: null };
+
+// ─── Merge Zoho Recruit jobs into state.jobs so the sidebar shows them ────────
+function mergeRecruitJobsIntoState() {
+  // Drop any previously merged recruit jobs
+  state.jobs = state.jobs.filter(j => j.source !== 'zoho_recruit');
+
+  const recruitJobs = _recruitData.jobs.map(rj => {
+    const rcands = (_recruitData.byJob[rj.id] || []).map(c => ({
+      id: c.id || ('zr_' + Math.random().toString(36).slice(2, 8)),
+      name: c.name || ((c.firstName || '') + ' ' + (c.lastName || '')).trim() || 'Unknown',
+      phone: c.whatsapp || c.mobile || c.phone || '',
+      email: c.email || '',
+      whatsapp: c.whatsapp || c.mobile || c.phone || '',
+      role: rj.title,
+      status: 'new',
+      source: 'Zoho Recruit' + (c.source ? ' / ' + c.source : ''),
+      experience: c.experience ? c.experience + ' yrs' : '',
+      skills: c.skills || '',
+      currentEmployer: c.currentEmployer || '',
+      currentTitle: c.currentTitle || '',
+      zohoId: c.id || '',
+      addedAt: new Date().toISOString(),
+      waSelected: new Set(),
+      inbox: [],
+      conversations: {},
+      waCustomMsg: null,
+      _fromRecruit: true
+    }));
+    return {
+      id: 'recruit_' + rj.id,
+      title: rj.title,
+      candidates: rcands,
+      source: 'zoho_recruit',
+      recruitJobId: rj.id,
+      status: rj.status || 'Active',
+      city: rj.city || '',
+      client: rj.client || '',
+      positions: rj.positions || 1,
+      jd: '',
+      chatHistory: [],
+      waSelected: new Set(),
+      inbox: [],
+      conversations: {},
+      waCustomMsg: null
+    };
+  });
+
+  state.jobs = [...state.jobs, ...recruitJobs];
+  renderJobSelect();
+  updateBadges();
+}
 
 function renderRecruit() {
   const content = document.getElementById('content');
@@ -4476,6 +4553,7 @@ async function syncRecruitData() {
     if (btn) { btn.disabled = false; btn.innerHTML = '↻ Sync from Zoho Recruit'; }
     const total = Object.values(_recruitData.byJob).reduce((s, a) => s + a.length, 0);
     toast(`✅ Sync complete — ${_recruitData.jobs.length} jobs, ${total} candidates`, 'success');
+    mergeRecruitJobsIntoState();
     renderRecruit();
   } catch(e) {
     toast('✗ Sync error: ' + e.message, 'error');
