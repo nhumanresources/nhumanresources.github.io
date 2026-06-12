@@ -8,7 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crosorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -4567,8 +4567,11 @@ async function syncRecruitData(silent = false) {
     if (!silent) toast('✅ Loaded ' + _recruitData.jobs.length + ' jobs — now loading candidates…');
     if (document.querySelector('.nav-item.active')?.dataset.view === 'recruit') renderRecruit();
 
-    // Load candidates for all jobs sequentially
-    for (const job of _recruitData.jobs) {
+    // Load candidates for the most recent jobs only (first 25) for efficiency.
+    // All jobs still appear in the list; older ones lazy-load candidates when clicked.
+    const CANDIDATE_PREFETCH_LIMIT = 25;
+    const jobsToPreload = _recruitData.jobs.slice(0, CANDIDATE_PREFETCH_LIMIT);
+    for (const job of jobsToPreload) {
       if (!silent && btn) btn.innerHTML = SPIN_SVG + ` Loading: ${escHtml(job.title.substring(0,25))}…`;
       await loadRecruitCandidatesForJob(job.id, job.title, token, domain);
       // Update sidebar candidate counts after each job loads
